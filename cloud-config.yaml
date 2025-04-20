@@ -1,0 +1,43 @@
+#cloud-config
+hostname: ${hostname}
+ssh_authorized_keys:
+  - ${ssh_authorized_keys}
+ssh_pwauth: True
+chpasswd:
+  list: |
+     root:xxxxxx
+  expire: False
+package_update: true
+package_upgrade: true
+runcmd:
+  - apt-get update
+  - apt-get install -y apt-transport-https ca-certificates curl
+  - curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+  - echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+  - apt-get update
+  - apt-get install -y kubelet kubeadm kubectl
+  - swapoff -a
+  - sed -i '/swap/s/^/#/' /etc/fstab
+  - systemctl restart containerd
+  - systemctl enable containerd
+  - growpart /dev/vda 2
+  - resize2fs /dev/vda2
+  - kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --ignore-preflight-errors=all || true
+  - mkdir -p $HOME/.kube
+  - cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  - chown $(id -u):$(id -g) $HOME/.kube/config
+  - kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/HEAD/manifests/kube-flannel.yml
+  - kubeadm token create --print-join-command > join_command.txt
+  - while [ ! -f join_command.txt ]; do sleep 1; done
+  - if [ "${hostname}" != "k8s-node-0" ]; then bash -c "$(cat join_command.txt)"; fi
+write_files:
+  - path: /etc/containerd/config.toml
+    permissions: '0644'
+    owner: root
+    content: |
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+          SystemdCgroup = true
+packages:
+  - docker.io
+  - containerd
