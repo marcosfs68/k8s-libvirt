@@ -18,6 +18,14 @@ write_files:
     permissions: '0644'
     content: |
       ${worker_ip_list}
+  - path: /root/volume.sh
+    permissions: '0744'
+    content: |
+      while [ ! -n "$(gluster volume info shared-volume 2>/dev/null | grep 'Status: Started') " ]; do
+        echo "Waiting for volume be ready..."
+        sleep 10;
+      done
+
 #  - path: /etc/containerd/config.toml
 #    permissions: '0644'
 #    owner: root
@@ -25,27 +33,88 @@ write_files:
 #      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
 #        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
 #          SystemdCgroup = true
-#packages:
-#  - docker.io
-#  - containerd
+packages:
+  - apt-transport-https 
+  - ca-certificates 
+  - curl 
+  - gnupg 
+  - keyutils 
+  - jq 
+  - rsyslog 
+  - tcpdump 
+  - net-tools 
+  - iputils-ping 
+  - traceroute 
+  - htop 
+  - iftop 
+  - iotop 
+  - vim 
+  - python3-jsondiff 
+  - bridge-utils 
+  - glusterfs-server 
+  - glusterfs-client
+  - docker.io
+  - containerd
 
 runcmd:
-  - apt-get update
-  - apt-get install -y apt-transport-https ca-certificates curl
-  #- curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
-  #- echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
-  #- apt-get update
-  #- apt-get install -y kubelet kubeadm kubectl
-  #- swapoff -a
-  #- sed -i '/swap/s/^/#/' /etc/fstab
+  - |
+    sed -i 's/mouse=a/mouse=r/' /usr/share/vim/vim90/defaults.vim
+    echo "Installing K8S packages...."
+    echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+    curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    DEBIAN_FRONTEND=noninteractive apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y kubelet kubeadm kubectl
+    swapoff -a
+    sed -i '/swap/s/^/#/' /etc/fstab
+  - |
+    echo "Enabling glusterfs...."
+    systemctl start  glusterd.service
+    systemctl enable glusterd.service
+    mkdir -p /data/glusterfs/brick1
+    mkdir /opt/shared
+    if [ ${is_manager} = true ]; then
+      sleep 10
+      WORKER_IPS=$(cat /root/worker_ips.txt)
+      for IP in $WORKER_IPS; do
+        echo "Probing $IP... $(gluster peer probe $IP)"
+      done
+      # Create the GlusterFS volume
+      BRICK_PATHS="${node_ip}:/data/glusterfs/brick1" # Add the manager brick
+      for IP in $WORKER_IPS; do
+        BRICK_PATHS="$BRICK_PATHS $IP:/data/glusterfs/brick1" # add worker bricks.
+      done
+      echo "Creating volume...."
+      gluster volume create shared-volume replica ${nodes} $BRICK_PATHS force      
+      sleep 30
+      echo "Starting volume...."
+      gluster volume start shared-volume
+
+      echo "Initializaing K8S...."
+      kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --ignore-preflight-errors=all || true
+      mkdir -p $HOME/.kube
+      cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+      chown $(id -u):$(id -g) $HOME/.kube/config
+      kubeadm token create --print-join-command > /opt/shared/join_command.txt
+
+    else
+      sleep 10
+      while true; do    
+        echo "Waiting for volume be ready..."
+        RES=$(gluster volume info shared-volume 2>/dev/null | grep 'Status: Started')
+        if [ -n "$RES" ]; then
+          echo "Volume Started!"
+          break
+        fi
+        sleep 10;
+      done
+    fi
+    echo "Mounting volume...."
+    mount -t glusterfs ${node_ip}:shared-volume /opt/shared
+    echo "${node_ip}:shared-volume /opt/shared glusterfs defaults,_netdev 0 0" >> /etc/fstab
+
+
   #- systemctl restart containerd
   #- systemctl enable containerd
-  #- growpart /dev/vda 2
-  #- resize2fs /dev/vda2
-  #- kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --ignore-preflight-errors=all || true
-  #- mkdir -p $HOME/.kube
-  #- cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-  #- chown $(id -u):$(id -g) $HOME/.kube/config
   #- kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/HEAD/manifests/kube-flannel.yml
   #- kubeadm token create --print-join-command > join_command.txt
   #- while [ ! -f join_command.txt ]; do sleep 1; done
