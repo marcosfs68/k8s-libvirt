@@ -3,5 +3,5 @@ output "node_ips" {
 }
 
 output "support_ip" {
-  value = libvirt_domain.k8s_support.network_interface[0].addresses[0]
+  value = [for node in libvirt_domain.k8s_support : node.network_interface[0].addresses[0]]
 }
