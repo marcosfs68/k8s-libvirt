@@ -26,3 +26,8 @@ variable "cidr" {
   type = string
   default = "192.168.123.0/24"
 }
+
+variable "support_enabled" {
+  type = bool
+  default = false
+}

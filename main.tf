@@ -59,6 +59,7 @@ resource "libvirt_domain" "k8s_node" {
 }
 #------------------------------------------------------------------------------
 resource "libvirt_volume" "node_support_disk" {
+  count  = var.support_enabled ? 1 : 0
   name   = "k8s-node-support-disk"
   base_volume_id = libvirt_volume.os_image.id
   format = "qcow2"
@@ -70,6 +71,7 @@ resource "libvirt_volume" "node_support_disk" {
 }
 
 resource "libvirt_cloudinit_disk" "node_support" {
+  count  = var.support_enabled ? 1 : 0
   name     = "k8s-node-support-cloudinit.iso"
   pool   = "VMs-nvme"
   user_data = templatefile("cloud-config-support.yaml", {
@@ -79,6 +81,7 @@ resource "libvirt_cloudinit_disk" "node_support" {
 }
 
 resource "libvirt_domain" "k8s_support" {
+  count  = var.support_enabled ? 1 : 0
   name   = "k8s-support"
   memory = var.node_memory
   vcpu   = var.node_vcpu
@@ -88,10 +91,10 @@ resource "libvirt_domain" "k8s_support" {
     addresses      = [local.node_ips[0]]
   }
   disk {
-    volume_id = libvirt_volume.node_support_disk.id
+    volume_id = libvirt_volume.node_support_disk[count.index].id
   }
   boot_device {
     dev = ["hd"]
   }
-  cloudinit = libvirt_cloudinit_disk.node_support.id
+  cloudinit = libvirt_cloudinit_disk.node_support[count.index].id
 }

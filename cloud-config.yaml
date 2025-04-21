@@ -60,12 +60,16 @@ runcmd:
   - |
     sed -i 's/mouse=a/mouse=r/' /usr/share/vim/vim90/defaults.vim
     echo "Installing K8S packages...."
-    echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
-    curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    chmod 644 /etc/apt/sources.list.d/kubernetes.list 
     DEBIAN_FRONTEND=noninteractive apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y kubelet kubeadm kubectl
     swapoff -a
     sed -i '/swap/s/^/#/' /etc/fstab
+    containerd config dump | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
+    systemctl restart containerd
   - |
     echo "Enabling glusterfs...."
     systemctl start  glusterd.service
@@ -88,14 +92,20 @@ runcmd:
       sleep 30
       echo "Starting volume...."
       gluster volume start shared-volume
+      echo "Mounting volume...."
+      mount -t glusterfs ${node_ip}:shared-volume /opt/shared
 
       echo "Initializaing K8S...."
       kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --ignore-preflight-errors=all || true
-      mkdir -p $HOME/.kube
-      cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-      chown $(id -u):$(id -g) $HOME/.kube/config
+      mkdir -p /root/.kube
+      cp -i /etc/kubernetes/admin.conf root/.kube/config
+      chown $(id -u):$(id -g) root/.kube/config
       kubeadm token create --print-join-command > /opt/shared/join_command.txt
 
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      echo "Applying Calico network..."
+      kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+      echo "Calico network applied."
     else
       sleep 10
       while true; do    
@@ -107,9 +117,14 @@ runcmd:
         fi
         sleep 10;
       done
+      echo "Mounting volume...."
+      mount -t glusterfs ${node_ip}:shared-volume /opt/shared
+      while [ ! -f /opt/shared/join_command.txt ]; do
+        echo "Waiting for K8S Token..."
+        sleep 10
+      done
+      $(cat /opt/shared/join_command.txt)
     fi
-    echo "Mounting volume...."
-    mount -t glusterfs ${node_ip}:shared-volume /opt/shared
     echo "${node_ip}:shared-volume /opt/shared glusterfs defaults,_netdev 0 0" >> /etc/fstab
 
 
