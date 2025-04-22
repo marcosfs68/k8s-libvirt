@@ -18,21 +18,21 @@ write_files:
     permissions: '0644'
     content: |
       ${worker_ip_list}
-  - path: /root/volume.sh
-    permissions: '0744'
+  - path: /root/.bash_aliases
+    permissions: '0644'
     content: |
-      while [ ! -n "$(gluster volume info shared-volume 2>/dev/null | grep 'Status: Started') " ]; do
-        echo "Waiting for volume be ready..."
-        sleep 10;
-      done
+      alias ssudo='sudo su -'
+      alias tcloud='tail -f /var/log/cloud-init-output.log'
+      alias k='kubectl'
+      alias kgpods='kubectl get pods'
+      alias kgdeploy='kubectl get deploy'
+      alias kgsvc='kubectl get svc'
+      alias kging='kubectl get ingress'
+      alias kdpods='kubectl describe pods'
+      alias kddeploy='kubectl describe deploy'
+      alias kdsvc='kubectl describe svc'
+      alias kding='kubectl describe ingress'
 
-#  - path: /etc/containerd/config.toml
-#    permissions: '0644'
-#    owner: root
-#    content: |
-#      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-#        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
-#          SystemdCgroup = true
 packages:
   - apt-transport-https 
   - ca-certificates 
@@ -127,10 +127,3 @@ runcmd:
     fi
     echo "${node_ip}:shared-volume /opt/shared glusterfs defaults,_netdev 0 0" >> /etc/fstab
 
-
-  #- systemctl restart containerd
-  #- systemctl enable containerd
-  #- kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/HEAD/manifests/kube-flannel.yml
-  #- kubeadm token create --print-join-command > join_command.txt
-  #- while [ ! -f join_command.txt ]; do sleep 1; done
-  #- if [ "${hostname}" != "k8s-node-0" ]; then bash -c "$(cat join_command.txt)"; fi

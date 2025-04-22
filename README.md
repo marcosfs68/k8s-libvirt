@@ -4,8 +4,7 @@ K8S deployed in libvirtd
 Terraform modules:
  - https://registry.terraform.io/providers/dmacvicar/libvirt/latest/docs
 
-O terraform precisa estar atualizado
-
+OBS: O terraform precisa estar atualizado
 
 Como a versão do módulo libvirt não suporta cdrom como virtio, somente IDE, o boot apresenta crash no kernel, então vamos ajustar o disco manualmente para usar
 
