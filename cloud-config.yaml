@@ -18,10 +18,9 @@ write_files:
     permissions: '0644'
     content: |
       ${worker_ip_list}
-  - path: /root/.bash_aliases
+  - path: /etc/profile.d/bash_aliases.sh
     permissions: '0644'
     content: |
-      alias ssudo='sudo su -'
       alias tcloud='tail -f /var/log/cloud-init-output.log'
       alias k='kubectl'
       alias kgpods='kubectl get pods'
@@ -32,6 +31,28 @@ write_files:
       alias kddeploy='kubectl describe deploy'
       alias kdsvc='kubectl describe svc'
       alias kding='kubectl describe ingress'
+  - path: /root/ipaddresspool.yaml
+    permissions: '0644'
+    content: |
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: default-pool
+        namespace: metallb-system
+      spec:
+        addresses:
+        - 192.168.123.200-192.168.123.250
+  - path: /root/l2advertisement.yaml
+    permissions: '0644'
+    content: |
+      apiVersion: metallb.io/v1beta1
+      kind: L2Advertisement
+      metadata:
+        name: default
+        namespace: metallb-system
+      spec:
+        ipAddressPools:
+        - default-pool
 
 packages:
   - apt-transport-https 
@@ -106,6 +127,27 @@ runcmd:
       echo "Applying Calico network..."
       kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
       echo "Calico network applied."
+      echo "Applying MetalLB..."
+      kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-frr.yaml
+      echo "MetalLB network applied."
+      echo "Applying Nginx Ingress..."
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/cloud/deploy.yaml
+      echo "Nginx Ingress Deployed!"
+      echo "Waiting for MetalLB webhook service endpoints to be ready..."
+      WEBHOOK_READY=false
+      while true; do
+        ENDPOINTS=$(kubectl get endpoints metallb-webhook-service -n metallb-system -o jsonpath='{.subsets[0].addresses[*].ip}' 2> /dev/null)
+        if [ ! -z "$ENDPOINTS" ]; then
+          echo "MetalLB webhook service endpoints are available: $ENDPOINTS"
+          WEBHOOK_READY=true
+          break
+        fi
+        echo "Waiting for MetalLB webhook service endpoints..."
+       sleep 10
+      done
+      kubectl apply -f /root/ipaddresspool.yaml
+      kubectl apply -f /root/l2advertisement.yaml
+
     else
       sleep 10
       while true; do    
