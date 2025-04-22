@@ -1,0 +1,129 @@
+#cloud-config
+hostname: ${hostname}
+ssh_authorized_keys:
+  - ${ssh_authorized_keys}
+ssh_pwauth: True
+chpasswd:
+  list: |
+     root:xxxxxx
+  expire: False
+package_update: true
+package_upgrade: true
+growpart:
+  mode: auto
+  devices: ['/']
+
+write_files:
+  - path: /root/worker_ips.txt
+    permissions: '0644'
+    content: |
+      ${worker_ip_list}
+  - path: /root/.bash_aliases
+    permissions: '0644'
+    content: |
+      alias ssudo='sudo su -'
+      alias tcloud='tail -f /var/log/cloud-init-output.log'
+      alias k='kubectl'
+      alias kgpods='kubectl get pods'
+      alias kgdeploy='kubectl get deploy'
+      alias kgsvc='kubectl get svc'
+      alias kging='kubectl get ingress'
+      alias kdpods='kubectl describe pods'
+      alias kddeploy='kubectl describe deploy'
+      alias kdsvc='kubectl describe svc'
+      alias kding='kubectl describe ingress'
+
+packages:
+  - apt-transport-https 
+  - ca-certificates 
+  - curl 
+  - gnupg 
+  - keyutils 
+  - jq 
+  - rsyslog 
+  - tcpdump 
+  - net-tools 
+  - iputils-ping 
+  - traceroute 
+  - htop 
+  - iftop 
+  - iotop 
+  - vim 
+  - python3-jsondiff 
+  - bridge-utils 
+  - glusterfs-server 
+  - glusterfs-client
+  - docker.io
+  - containerd
+
+runcmd:
+  - |
+    sed -i 's/mouse=a/mouse=r/' /usr/share/vim/vim90/defaults.vim
+    echo "Installing K8S packages...."
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    chmod 644 /etc/apt/sources.list.d/kubernetes.list 
+    DEBIAN_FRONTEND=noninteractive apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y kubelet kubeadm kubectl
+    swapoff -a
+    sed -i '/swap/s/^/#/' /etc/fstab
+    containerd config dump | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
+    systemctl restart containerd
+  - |
+    echo "Enabling glusterfs...."
+    systemctl start  glusterd.service
+    systemctl enable glusterd.service
+    mkdir -p /data/glusterfs/brick1
+    mkdir /opt/shared
+    if [ ${is_manager} = true ]; then
+      sleep 10
+      WORKER_IPS=$(cat /root/worker_ips.txt)
+      for IP in $WORKER_IPS; do
+        echo "Probing $IP... $(gluster peer probe $IP)"
+      done
+      # Create the GlusterFS volume
+      BRICK_PATHS="${node_ip}:/data/glusterfs/brick1" # Add the manager brick
+      for IP in $WORKER_IPS; do
+        BRICK_PATHS="$BRICK_PATHS $IP:/data/glusterfs/brick1" # add worker bricks.
+      done
+      echo "Creating volume...."
+      gluster volume create shared-volume replica ${nodes} $BRICK_PATHS force      
+      sleep 30
+      echo "Starting volume...."
+      gluster volume start shared-volume
+      echo "Mounting volume...."
+      mount -t glusterfs ${node_ip}:shared-volume /opt/shared
+
+      echo "Initializaing K8S...."
+      kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --ignore-preflight-errors=all || true
+      mkdir -p /root/.kube
+      cp -i /etc/kubernetes/admin.conf root/.kube/config
+      chown $(id -u):$(id -g) root/.kube/config
+      kubeadm token create --print-join-command > /opt/shared/join_command.txt
+
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      echo "Applying Calico network..."
+      kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+      echo "Calico network applied."
+    else
+      sleep 10
+      while true; do    
+        echo "Waiting for volume be ready..."
+        RES=$(gluster volume info shared-volume 2>/dev/null | grep 'Status: Started')
+        if [ -n "$RES" ]; then
+          echo "Volume Started!"
+          break
+        fi
+        sleep 10;
+      done
+      echo "Mounting volume...."
+      mount -t glusterfs ${node_ip}:shared-volume /opt/shared
+      while [ ! -f /opt/shared/join_command.txt ]; do
+        echo "Waiting for K8S Token..."
+        sleep 10
+      done
+      $(cat /opt/shared/join_command.txt)
+    fi
+    echo "${node_ip}:shared-volume /opt/shared glusterfs defaults,_netdev 0 0" >> /etc/fstab
+
