@@ -1,0 +1,34 @@
+configuration:
+  backupStorageLocation:
+    - name: nfs-primary
+      provider: aws
+      bucket: velero-backups # Choose a bucket name
+      config:
+        region: us-east-1 # Standard AWS region (doesn't matter for MinIO)
+        s3ForcePathStyle: "true" # Important for MinIO
+        s3Url: "http://minio-service.velero.svc.cluster.local:9000" # If MinIO is in your cluster
+        # If MinIO is running externally (replace with its IP/hostname):
+        # s3Url: "http://192.168.123.1:9000"
+        credentialsSecretName: minio-credentials # We'll create this secret
+  volumeSnapshotLocation:
+    - name: default
+      provider: csi-driver
+      config: {}
+
+initContainers:
+  - name: velero-plugin-for-aws
+    image: velero/velero-plugin-for-aws:v1.16.0 # Match your Velero version
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - name: plugins
+        mountPath: /target
+
+volumes:
+  - name: nfs-backup-volume
+    persistentVolumeClaim:
+      claimName: velero-nfs-pvc
+  - name: plugins
+    emptyDir: {}
+
+features:
+  enableCSI: true

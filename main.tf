@@ -55,6 +55,9 @@ resource "libvirt_domain" "k8s_node" {
   boot_device {
     dev = ["hd"]
   }
+  cpu {
+    mode = "host-model"
+  }
   cloudinit = libvirt_cloudinit_disk.node_cloudinit[count.index].id
 }
 #------------------------------------------------------------------------------
@@ -97,4 +100,7 @@ resource "libvirt_domain" "k8s_support" {
     dev = ["hd"]
   }
   cloudinit = libvirt_cloudinit_disk.node_support[count.index].id
+  cpu {
+    mode = "host-model"
+  }
 }

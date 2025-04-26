@@ -91,6 +91,7 @@ runcmd:
     sed -i '/swap/s/^/#/' /etc/fstab
     containerd config dump | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
     systemctl restart containerd
+  
   - |
     echo "Enabling glusterfs...."
     systemctl start  glusterd.service
@@ -108,14 +109,16 @@ runcmd:
       for IP in $WORKER_IPS; do
         BRICK_PATHS="$BRICK_PATHS $IP:/data/glusterfs/brick1" # add worker bricks.
       done
+      sleep 20
       echo "Creating volume...."
-      gluster volume create shared-volume replica ${nodes} $BRICK_PATHS force      
+      echo "gluster volume create shared-volume replica ${nodes} $BRICK_PATHS force"
+      gluster volume create shared-volume replica ${nodes} $BRICK_PATHS force
       sleep 30
       echo "Starting volume...."
       gluster volume start shared-volume
       echo "Mounting volume...."
       mount -t glusterfs ${node_ip}:shared-volume /opt/shared
-
+  
       echo "Initializaing K8S...."
       kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --ignore-preflight-errors=all || true
       mkdir -p /root/.kube
