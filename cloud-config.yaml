@@ -155,9 +155,10 @@ runcmd:
       echo "complete -F __start_kubectl k" >> /root/.bashrc
      
       #Helm
-      HELM_RELEASE=$(curl -L -s -H 'Accept: application/json' https://github.com/helm/helm/releases/latest| sed -e 's/.*"tag_name":"\([^"]*\)".*/\1/')
-      tar -xvz -C /tmp/ -f <(wget -q -O - https://get.helm.sh/helm-$HELM_RELEASE-linux-$ARCH.tar.gz)
-      install -o root -g root -m 0755 /tmp/linux-$ARCH/helm /usr/local/bin/helm
+      HELM_RELEASE=$(curl -L -s -H 'Accept: application/json' https://github.com/helm/helm/releases/latest | sed -e 's/.*"tag_name":"\([^"]*\)".*/\1/')
+      wget -q https://get.helm.sh/helm-$HELM_RELEASE-linux-amd64.tar.gz -O /tmp/linux-amd64.tgz
+      tar -xvzf /tmp/linux-amd64.tgz
+      install -o root -g root -m 0755 linux-amd64/helm /usr/local/bin/helm
 
     else
       sleep 10
